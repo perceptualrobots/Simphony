@@ -95,10 +95,10 @@ elif option == 7:
     env_test = gym.make('BipedalWalkerHardcore-v3')
 
 elif option == 8:
-    limit_step = 700
-    limit_eval = 700
-    env = gym.make('LunarLanderContinuous-v2')
-    env_test = gym.make('LunarLanderContinuous-v2')
+    limit_step = 500
+    limit_eval = 500
+    env = gym.make('LunarLanderContinuous-v3')
+    env_test = gym.make('LunarLanderContinuous-v3', render_mode="human")
 
 elif option == 9:
     limit_step = 300
@@ -123,35 +123,62 @@ algo = Symphony(state_dim, action_dim, hidden_dim, device, max_action, burst, tr
 
 
 
-#used to create random initalization in Actor -> less dependendance on the specific random seed.
+#used to create random initalization in Actor -> less dependance on the specific random seed.
 def init_weights(m):
     if isinstance(m, nn.Linear): torch.nn.init.xavier_uniform_(m.weight)
 
 
 
+
 #testing model
-def testing(env, limit_step, test_episodes):
+def testing(env, limit_step, test_episodes, render=False):
     if test_episodes<1: return
     print("Validation... ", test_episodes, " epsodes")
     episode_return = []
 
+    import random
+    last_rewards = []
     for test_episode in range(test_episodes):
-        state = env.reset()[0]
+        # Use test_episode as the seed for reproducibility per episode
+        seed = test_episode+1
+        np.random.seed(seed)
+        random.seed(seed)
+        torch.manual_seed(seed)
+        if hasattr(env, 'reset'):
+            state = env.reset(seed=seed)[0]
+        else:
+            state = env.reset()[0]
         rewards = []
+        last_reward = None
+
+        # Optionally display the environment window for the first test episode
+        # if render and hasattr(env, 'render'):
+        #     env.render()
 
         for steps in range(1,limit_step+1):
             action = algo.select_action(state, replay_buffer, mean=True)
-            #action = algo.select_action(state, mean=True)
             next_state, reward, done, info , _ = env.step(action)
             rewards.append(reward)
+            last_reward = reward
             state = next_state
-            
+
+            # Optionally render at every step for the first test episode
+            # if render and test_episode == 0 and hasattr(env, 'render'):
+            #     env.render()
+
             if done: break
 
         episode_return.append(np.sum(rewards))
+        last_rewards.append(last_reward)
 
         validate_return = np.mean(episode_return[-100:])
-        print(f"trial {test_episode}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}")
+        print(f"trial {test_episode}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}, Last reward: {last_reward}")
+
+    # After all episodes, log the statistics of last_rewards
+    count_100 = sum(1 for r in last_rewards if r == 100)
+    count_neg100 = sum(1 for r in last_rewards if r == -100)
+    count_near0 = sum(1 for r in last_rewards if abs(r) < 10)
+    print(f"Summary of last rewards over {test_episodes} episodes: +100={count_100}, -100={count_neg100}, ~0={count_near0}")
 
 
 
@@ -183,9 +210,61 @@ try:
     algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
     algo.replay_buffer = replay_buffer
     print('models loaded')
-    testing(env_test, limit_eval, 10)
+    # testing(env_test, limit_eval, 10)
 except:
     print("problem during loading models")
+
+
+#-------------------------------------------------------------------------------------
+
+# Dynamically create env_test for test-only mode, with or without rendering
+import sys
+import re
+render = '--render' in sys.argv
+# Default number of test episodes
+test_episodes = 10
+# Allow user to specify number of test episodes with --episodes=N
+for arg in sys.argv:
+    match = re.match(r'--episodes=(\d+)', arg)
+    if match:
+        test_episodes = int(match.group(1))
+        break
+
+def make_env_test(option, render):
+    if option == -1:
+        return gym.make('Pendulum-v1', render_mode="human" if render else None)
+    elif option == 0:
+        return gym.make('MountainCarContinuous-v0', render_mode="human" if render else None)
+    elif option == 1:
+        return gym.make('HalfCheetah-v4', render_mode="human" if render else None)
+    elif option == 2:
+        return gym.make('Walker2d-v4', render_mode="human" if render else None)
+    elif option == 3:
+        return gym.make('Humanoid-v4', render_mode="human" if render else None)
+    elif option == 4:
+        return gym.make('HumanoidStandup-v4', render_mode="human" if render else None)
+    elif option == 5:
+        return gym.make('Ant-v4', render_mode="human" if render else None)
+    elif option == 6:
+        return gym.make('BipedalWalker-v3', render_mode="human" if render else None)
+    elif option == 7:
+        return gym.make('BipedalWalkerHardcore-v3', render_mode="human" if render else None)
+    elif option == 8:
+        return gym.make('LunarLanderContinuous-v3', render_mode="human" if render else None)
+    elif option == 9:
+        return gym.make('Pusher-v4', render_mode="human" if render else None)
+    elif option == 10:
+        return gym.make('Swimmer-v4', render_mode="human" if render else None)
+    else:
+        raise ValueError("Unknown option for environment")
+
+if '--test-only' in sys.argv:
+    env_test = make_env_test(option, render)
+    print('Running in test-only mode...')
+    print(f"Render mode: {render}")
+    print(f"Test episodes: {test_episodes}")
+    testing(env_test, limit_eval, test_episodes, render=render)
+    exit()
 
 #-------------------------------------------------------------------------------------
 
@@ -289,3 +368,5 @@ for i in range(start_episode, num_episodes):
 # * Apart from the algo core, fade_factor, tr_between_ep and limit_steps are crucial parameters for speed of training.
 #   E.g. limit_steps = 700 instead of 2000 introduce less variance and makes BipedalWalkerHardcore's Agent less discouraged to go forward.
 #   high values in tr_between_ep can make a "stiff" agent, but sometimes it is helpful for straight posture from the beginning (Humanoid-v4).
+
+
