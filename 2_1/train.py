@@ -29,7 +29,7 @@ limit_eval = 2000 #max steps per evaluation
 num_episodes = 10000000
 start_episode = 0 #number for the identification of the current episode
 total_rewards, total_steps, test_rewards, Q_learning = [], [], [], False
-
+training_validation_episodes = 5 #number of episodes during validation
 
 hidden_dim = 256
 max_action = 1.0
@@ -180,38 +180,62 @@ def testing(env, limit_step, test_episodes, render=False):
     count_near0 = sum(1 for r in last_rewards if abs(r) < 10)
     print(f"Summary of last rewards over {test_episodes} episodes: +100={count_100}, -100={count_neg100}, ~0={count_near0}")
 
+    rtn = test_episodes == count_100
 
+    if rtn:
+        print("All test episodes achieved a reward of 100.")
 
-
+    return rtn
 
 #--------------------loading existing models, replay_buffer, parameters-------------------------
 
 try:
     print("loading buffer...")
-    with open('replay_buffer', 'rb') as file:
-        dict = pickle.load(file)
-        algo.actor.noise.x_coor = dict['x_coor']
-        replay_buffer = dict['buffer']
-        total_rewards = dict['total_rewards']
-        total_steps = dict['total_steps']
-        average_steps = dict['average_steps']
-        if len(replay_buffer)>=explore_time and not Q_learning: Q_learning = True
+    try:
+        with open('replay_buffer', 'rb') as file:
+            dict = pickle.load(file)
+    except Exception as e:
+        import sys, os
+        if '--test-only' in sys.argv:
+            buffer_path = os.path.join('..', 'test_models', 'replay_buffer')
+            print(f"Trying alternate buffer path: {buffer_path}")
+            with open(buffer_path, 'rb') as file:
+                dict = pickle.load(file)
+        else:
+            raise e
+    algo.actor.noise.x_coor = dict['x_coor']
+    replay_buffer = dict['buffer']
+    total_rewards = dict['total_rewards']
+    total_steps = dict['total_steps']
+    average_steps = dict['average_steps']
+    if len(replay_buffer)>=explore_time and not Q_learning: Q_learning = True
     print('buffer loaded, buffer length', len(replay_buffer))
 
     start_episode = len(total_steps)
 
-except:
+except Exception as e:
     print("problem during loading buffer")
 
 try:
     print("loading models...")
-    algo.actor.load_state_dict(torch.load('actor_model.pt'))
-    algo.critic.load_state_dict(torch.load('critic_model.pt'))
-    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
+    import sys, os
+    try:
+        algo.actor.load_state_dict(torch.load('actor_model.pt'))
+        algo.critic.load_state_dict(torch.load('critic_model.pt'))
+        algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
+    except Exception as e:
+        if '--test-only' in sys.argv:
+            model_dir = os.path.join('..', 'test_models')
+            print(f"Trying alternate model path: {model_dir}")
+            algo.actor.load_state_dict(torch.load(os.path.join(model_dir, 'actor_model.pt')))
+            algo.critic.load_state_dict(torch.load(os.path.join(model_dir, 'critic_model.pt')))
+            algo.critic_target.load_state_dict(torch.load(os.path.join(model_dir, 'critic_target_model.pt')))
+        else:
+            raise e
     algo.replay_buffer = replay_buffer
     print('models loaded')
     # testing(env_test, limit_eval, 10)
-except:
+except Exception as e:
     print("problem during loading models")
 
 
@@ -270,6 +294,7 @@ if '--test-only' in sys.argv:
 
 for i in range(start_episode, num_episodes):
     
+    episode_start_time = time.time()
     rewards = []
     state = env.reset()[0]
 
@@ -343,8 +368,17 @@ for i in range(start_episode, num_episodes):
     total_steps.append(episode_steps)
     average_steps = np.mean(total_steps[-100:])
 
-
-    print(f"Ep {i}: Rtrn = {total_rewards[-1]:.2f} | ep steps = {episode_steps}")
+    episode_end_time = time.time()
+    episode_duration = episode_end_time - episode_start_time
+    if i == start_episode:
+        training_start_time = episode_start_time
+    total_training_time = episode_end_time - training_start_time
+    def format_time(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    print(f"Ep {i}: Rtrn = {total_rewards[-1]:.2f} | ep steps = {episode_steps} | episode time = {format_time(episode_duration)} | total training time = {format_time(total_training_time)}")
 
 
     if Q_learning:
@@ -361,7 +395,10 @@ for i in range(start_episode, num_episodes):
 
 
         #-----------------validation-------------------------
-        if (i>=start_test and i%50==0): testing(env_test, limit_step=limit_eval, test_episodes=10)
+        if (i>=start_test and i%50==0):
+            if testing(env_test, limit_step=limit_eval, test_episodes=training_validation_episodes):
+                print("Terminating training: testing returned True.")
+                break
               
 
 #====================================================
