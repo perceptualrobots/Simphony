@@ -287,6 +287,48 @@ if '--test-only' in sys.argv:
     print('Running in test-only mode...')
     print(f"Render mode: {render}")
     print(f"Test episodes: {test_episodes}")
+
+    # --- Model details report ---
+    def count_nodes(module):
+        nodes = 0
+        for m in module.modules():
+            if isinstance(m, nn.Linear):
+                nodes += m.out_features
+        return nodes
+
+    def print_model_details(model, name):
+        total_params = sum(p.numel() for p in model.parameters())
+        nodes = count_nodes(model)
+        print(f"{name} - Total parameters: {total_params}, Total nodes: {nodes}")
+
+    print_model_details(algo.actor, "Actor")
+    print_model_details(algo.critic, "Critic")
+
+    # Try to generate and save a network image using torchviz
+    try:
+        from torchviz import make_dot
+        dummy_state = torch.zeros(1, state_dim).to(device)
+        dummy_action = torch.zeros(1, action_dim).to(device)
+        actor_out = algo.actor(dummy_state, mean=True)
+        if isinstance(actor_out, (list, tuple)):
+            actor_out = actor_out[0]
+        actor_graph = make_dot(actor_out, params={k: v for k, v in algo.actor.named_parameters()})
+        actor_graph.format = "png"
+        actor_graph.render("actor_network", cleanup=True)
+        print("Actor network image saved as actor_network.png")
+
+        critic_out = algo.critic(dummy_state, dummy_action)
+        if isinstance(critic_out, (list, tuple)):
+            critic_out = critic_out[0]
+        critic_graph = make_dot(critic_out, params={k: v for k, v in algo.critic.named_parameters()})
+        critic_graph.format = "png"
+        critic_graph.render("critic_network", cleanup=True)
+        print("Critic network image saved as critic_network.png")
+    except ImportError:
+        print("torchviz not installed. Run 'pip install torchviz' in your .venv to generate network images.")
+    except Exception as e:
+        print(f"Could not generate network images: {e}")
+
     testing(env_test, limit_eval, test_episodes, render=render)
     exit()
 
