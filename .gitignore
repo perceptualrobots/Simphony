@@ -8,3 +8,6 @@ __pycache__/symphony.cpython-39.pyc
 2_1/critic_network.png
 2_1/critic_target_model.pt
 __pycache__/symphony.cpython-310.pyc
+2_1/videos
+
+2_1/actor_network

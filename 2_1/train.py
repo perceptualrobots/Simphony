@@ -131,48 +131,77 @@ def init_weights(m):
 
 
 #testing model
-def testing(env, limit_step, test_episodes, render=False):
-    if test_episodes<1: return
+def testing(env, limit_step, test_episodes, render=False, record_video=False, video_dir="videos"):
+    """
+    Test the agent in the environment.
+    If record_video is True, saves a video for each test_episode in video_dir.
+    """
+    if test_episodes < 1:
+        return
     print("Validation... ", test_episodes, " epsodes")
     episode_return = []
 
     import random
+    import os
     last_rewards = []
+
     for test_episode in range(test_episodes):
         # Use test_episode as the seed for reproducibility per episode
-        seed = test_episode+1
+        seed = test_episode + 1
         np.random.seed(seed)
         random.seed(seed)
         torch.manual_seed(seed)
+        rewards = []
+        last_reward = None
+
+        # Optionally wrap env for video recording (after knowing the episode return)
+        # But we need the return value for the filename, so we must delay wrapping until after the episode
         if hasattr(env, 'reset'):
             state = env.reset(seed=seed)[0]
         else:
             state = env.reset()[0]
-        rewards = []
-        last_reward = None
 
-        # Optionally display the environment window for the first test episode
-        # if render and hasattr(env, 'render'):
-        #     env.render()
-
-        for steps in range(1,limit_step+1):
+        for steps in range(1, limit_step + 1):
             action = algo.select_action(state, replay_buffer, mean=True)
-            next_state, reward, done, info , _ = env.step(action)
+            next_state, reward, done, info, _ = env.step(action)
             rewards.append(reward)
             last_reward = reward
             state = next_state
+            if done:
+                break
 
-            # Optionally render at every step for the first test episode
-            # if render and test_episode == 0 and hasattr(env, 'render'):
-            #     env.render()
-
-            if done: break
-
-        episode_return.append(np.sum(rewards))
+        ep_return = np.sum(rewards)
+        episode_return.append(ep_return)
         last_rewards.append(last_reward)
 
         validate_return = np.mean(episode_return[-100:])
-        print(f"trial {test_episode}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}, Last reward: {last_reward}")
+        print(f"trial {test_episode}:, Rtrn = {ep_return:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}, Last reward: {last_reward}")
+
+        # Now record the video if requested, replaying the episode with the same seed and actions
+        if record_video:
+            os.makedirs(video_dir, exist_ok=True)
+            from gymnasium.wrappers import RecordVideo
+            # Re-create the environment for video recording
+            video_name = f"test_ep{test_episode}_return_{ep_return:.2f}"
+            video_env = RecordVideo(make_env_test(option, render, record_video=True), video_dir, episode_trigger=lambda ep: True, name_prefix=video_name)
+            # Replay the episode
+            if hasattr(video_env, 'reset'):
+                state = video_env.reset(seed=seed)[0]
+            else:
+                state = video_env.reset()[0]
+            for a in rewards:
+                # This is a hack: we don't have the actions, only rewards, so just run the episode again
+                # In practice, to get the exact same episode, you would need to store actions and states
+                # Here, we just run the episode again with the same seed
+                action = algo.select_action(state, replay_buffer, mean=True)
+                next_state, reward, done, info, _ = video_env.step(action)
+                state = next_state
+                if done:
+                    break
+            try:
+                video_env.close()
+            except Exception as e:
+                print(f"Warning: Could not close video_env for video saving: {e}")
 
     # After all episodes, log the statistics of last_rewards
     count_100 = sum(1 for r in last_rewards if r == 100)
@@ -185,6 +214,12 @@ def testing(env, limit_step, test_episodes, render=False):
     if rtn:
         print("All test episodes achieved a reward of 100.")
 
+    if record_video:
+        # Ensure video is saved by closing the environment
+        try:
+            env.close()
+        except Exception as e:
+            print(f"Warning: Could not close env for video saving: {e}")
     return rtn
 
 #--------------------loading existing models, replay_buffer, parameters-------------------------
@@ -245,6 +280,8 @@ except Exception as e:
 import sys
 import re
 render = '--render' in sys.argv
+# Add record_video command line option
+record_video = '--record_video' in sys.argv
 # Default number of test episodes
 test_episodes = 10
 # Allow user to specify number of test episodes with --episodes=N
@@ -254,39 +291,45 @@ for arg in sys.argv:
         test_episodes = int(match.group(1))
         break
 
-def make_env_test(option, render):
+def make_env_test(option, render, record_video=False):
+    # If recording video, use render_mode="rgb_array" as required by gymnasium RecordVideo
+    if record_video:
+        render_mode = "rgb_array"
+    else:
+        render_mode = "human" if render else None
     if option == -1:
-        return gym.make('Pendulum-v1', render_mode="human" if render else None)
+        return gym.make('Pendulum-v1', render_mode=render_mode)
     elif option == 0:
-        return gym.make('MountainCarContinuous-v0', render_mode="human" if render else None)
+        return gym.make('MountainCarContinuous-v0', render_mode=render_mode)
     elif option == 1:
-        return gym.make('HalfCheetah-v4', render_mode="human" if render else None)
+        return gym.make('HalfCheetah-v4', render_mode=render_mode)
     elif option == 2:
-        return gym.make('Walker2d-v4', render_mode="human" if render else None)
+        return gym.make('Walker2d-v4', render_mode=render_mode)
     elif option == 3:
-        return gym.make('Humanoid-v4', render_mode="human" if render else None)
+        return gym.make('Humanoid-v4', render_mode=render_mode)
     elif option == 4:
-        return gym.make('HumanoidStandup-v4', render_mode="human" if render else None)
+        return gym.make('HumanoidStandup-v4', render_mode=render_mode)
     elif option == 5:
-        return gym.make('Ant-v4', render_mode="human" if render else None)
+        return gym.make('Ant-v4', render_mode=render_mode)
     elif option == 6:
-        return gym.make('BipedalWalker-v3', render_mode="human" if render else None)
+        return gym.make('BipedalWalker-v3', render_mode=render_mode)
     elif option == 7:
-        return gym.make('BipedalWalkerHardcore-v3', render_mode="human" if render else None)
+        return gym.make('BipedalWalkerHardcore-v3', render_mode=render_mode)
     elif option == 8:
-        return gym.make('LunarLanderContinuous-v3', render_mode="human" if render else None)
+        return gym.make('LunarLanderContinuous-v3', render_mode=render_mode)
     elif option == 9:
-        return gym.make('Pusher-v4', render_mode="human" if render else None)
+        return gym.make('Pusher-v4', render_mode=render_mode)
     elif option == 10:
-        return gym.make('Swimmer-v4', render_mode="human" if render else None)
+        return gym.make('Swimmer-v4', render_mode=render_mode)
     else:
         raise ValueError("Unknown option for environment")
 
 if '--test-only' in sys.argv:
-    env_test = make_env_test(option, render)
+    env_test = make_env_test(option, render, record_video=record_video)
     print('Running in test-only mode...')
     print(f"Render mode: {render}")
     print(f"Test episodes: {test_episodes}")
+    print(f"Record video: {record_video}")
 
     # --- Model details report ---
     def count_nodes(module):
@@ -329,7 +372,7 @@ if '--test-only' in sys.argv:
     except Exception as e:
         print(f"Could not generate network images: {e}")
 
-    testing(env_test, limit_eval, test_episodes, render=render)
+    testing(env_test, limit_eval, test_episodes, render=render, record_video=record_video)
     exit()
 
 #-------------------------------------------------------------------------------------
