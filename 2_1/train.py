@@ -8,17 +8,17 @@ import pickle
 import time
 from symphony_op_2_1 import Symphony, ReplayBuffer
 import math
-
+import sys
+import re
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
-#global parameters
-# environment type. Different Environments have some details that you need to bear in mind.
+# -------------------- Command line options and global parameters --------------------
 option = 8
 burst = False # big amplitude random moves in the beginning
 tr_noise = True  #if extra noise is needed during training
-
 explore_time = 5000
 tr_between_ep_init = 15 # training between episodes
 tr_between_ep_const = False
@@ -30,55 +30,54 @@ num_episodes = 10000000
 start_episode = 0 #number for the identification of the current episode
 total_rewards, total_steps, test_rewards, Q_learning = [], [], [], False
 training_validation_episodes = 5 #number of episodes during validation
-
 hidden_dim = 256
 max_action = 1.0
 fade_factor = 7 # fading memory factor, 7 -remembers ~30% of the last transtions before gradual forgetting, 1 - linear forgetting, 10 - ~50% of transitions, 100 - ~70% of transitions.
 stall_penalty = 0.07 # moving is life, stalling is dangerous, optimal value = 0.07, higher values can create extra vibrations.
 capacity = "full" # short = 100k, medium=300k, full=500k replay buffer memory size.
 
+render = '--render' in sys.argv
+record_video = '--record_video' in sys.argv
+models_dir = os.getcwd()
+test_episodes = 10
+for arg in sys.argv:
+    if arg.startswith('--models-dir='):
+        models_dir = arg.split('=', 1)[1]
+    match = re.match(r'--episodes=(\d+)', arg)
+    if match:
+        test_episodes = int(match.group(1))
+        break
+print(f"Using models directory: {models_dir}")
 
-
-
-
+# -------------------- Environment setup --------------------
 if option == -1:
     env = gym.make('Pendulum-v1')
     env_test = gym.make('Pendulum-v1', render_mode="human")
-
 elif option == 0:
-    #burst = True
     env = gym.make('MountainCarContinuous-v0')
     env_test = gym.make('MountainCarContinuous-v0', render_mode="human")
-
 elif option == 1:
     env = gym.make('HalfCheetah-v4')
     env_test = gym.make('HalfCheetah-v4', render_mode="human")
-
 elif option == 2:
     tr_between_ep_init = 70
     env = gym.make('Walker2d-v4')
     env_test = gym.make('Walker2d-v4', render_mode="human")
-
 elif option == 3:
     tr_between_ep_init = 200
     env = gym.make('Humanoid-v4')
     env_test = gym.make('Humanoid-v4', render_mode="human")
-
 elif option == 4:
     limit_step = 300
     limit_eval = 300
     tr_between_ep_init = 70
     env = gym.make('HumanoidStandup-v4')
     env_test = gym.make('HumanoidStandup-v4', render_mode="human")
-
 elif option == 5:
     env = gym.make('Ant-v4')
     env_test = gym.make('Ant-v4', render_mode="human")
-    #Ant environment has problem when Ant is flipped upside down and it is not detected (rotation around x is not checked, only z coordinate), we can check to save some time:
     angle_limit = 0.4
-    #less aggressive movements -> faster learning but less final speed
     max_action = 0.7
-
 elif option == 6:
     tr_between_ep_init = 40
     burst = True
@@ -86,40 +85,34 @@ elif option == 6:
     limit_step = int(1e+6)
     env = gym.make('BipedalWalker-v3')
     env_test = gym.make('BipedalWalker-v3', render_mode="human")
-
 elif option == 7:
     burst = True
     tr_noise = False
     tr_between_ep_init = 0
     env = gym.make('BipedalWalkerHardcore-v3', render_mode="human")
     env_test = gym.make('BipedalWalkerHardcore-v3')
-
 elif option == 8:
     limit_step = 500
     limit_eval = 500
     env = gym.make('LunarLanderContinuous-v3')
     env_test = gym.make('LunarLanderContinuous-v3', render_mode="human")
-
 elif option == 9:
     limit_step = 300
     limit_eval = 200
     env = gym.make('Pusher-v4')
     env_test = gym.make('Pusher-v4', render_mode="human")
-
 elif option == 10:
     burst = True
     env = gym.make('Swimmer-v4')
     env_test = gym.make('Swimmer-v4', render_mode="human")
 
-
-
 state_dim = env.observation_space.shape[0]
-action_dim= env.action_space.shape[0]
-
+action_dim = env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = max_action*torch.FloatTensor(env.action_space.high).to(device) if env.action_space.is_bounded() else max_action*1.0
 replay_buffer = ReplayBuffer(state_dim, action_dim, capacity, device, fade_factor, stall_penalty)
 algo = Symphony(state_dim, action_dim, hidden_dim, device, max_action, burst, tr_noise)
+
 
 
 
@@ -251,29 +244,6 @@ try:
 except Exception as e:
     print("problem during loading buffer")
 
-try:
-    print("loading models...")
-    import sys, os
-    try:
-        algo.actor.load_state_dict(torch.load('actor_model.pt'))
-        algo.critic.load_state_dict(torch.load('critic_model.pt'))
-        algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
-    except Exception as e:
-        if '--test-only' in sys.argv:
-            model_dir = os.path.join('..', 'test_models')
-            print(f"Trying alternate model path: {model_dir}")
-            algo.actor.load_state_dict(torch.load(os.path.join(model_dir, 'actor_model.pt')))
-            algo.critic.load_state_dict(torch.load(os.path.join(model_dir, 'critic_model.pt')))
-            algo.critic_target.load_state_dict(torch.load(os.path.join(model_dir, 'critic_target_model.pt')))
-        else:
-            raise e
-    algo.replay_buffer = replay_buffer
-    print('models loaded')
-    # testing(env_test, limit_eval, 10)
-except Exception as e:
-    print("problem during loading models")
-
-
 #-------------------------------------------------------------------------------------
 
 # Dynamically create env_test for test-only mode, with or without rendering
@@ -282,14 +252,20 @@ import re
 render = '--render' in sys.argv
 # Add record_video command line option
 record_video = '--record_video' in sys.argv
-# Default number of test episodes
+# Add models directory command line option
+import os
+models_dir = os.getcwd()
 test_episodes = 10
-# Allow user to specify number of test episodes with --episodes=N
 for arg in sys.argv:
+    if arg.startswith('--models-dir='):
+        models_dir = arg.split('=', 1)[1]
     match = re.match(r'--episodes=(\d+)', arg)
     if match:
         test_episodes = int(match.group(1))
         break
+
+# Always print the models_dir being used
+print(f"Using models directory: {models_dir}")
 
 def make_env_test(option, render, record_video=False):
     # If recording video, use render_mode="rgb_array" as required by gymnasium RecordVideo
@@ -325,11 +301,25 @@ def make_env_test(option, render, record_video=False):
         raise ValueError("Unknown option for environment")
 
 if '--test-only' in sys.argv:
+
     env_test = make_env_test(option, render, record_video=record_video)
     print('Running in test-only mode...')
     print(f"Render mode: {render}")
     print(f"Test episodes: {test_episodes}")
     print(f"Record video: {record_video}")
+
+    # --- Model loading (using models_dir) ---
+    try:
+        print("loading models...")
+        actor_path = os.path.join(models_dir, 'actor_model.pt')
+        critic_path = os.path.join(models_dir, 'critic_model.pt')
+        critic_target_path = os.path.join(models_dir, 'critic_target_model.pt')
+        algo.actor.load_state_dict(torch.load(actor_path))
+        algo.critic.load_state_dict(torch.load(critic_path))
+        algo.critic_target.load_state_dict(torch.load(critic_target_path))
+        print('models loaded')
+    except Exception as e:
+        print("problem during loading models")
 
     # --- Model details report ---
     def count_nodes(module):
