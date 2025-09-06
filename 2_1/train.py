@@ -202,6 +202,36 @@ def testing(env, limit_step, test_episodes, render=False, record_video=False, vi
     count_near0 = sum(1 for r in last_rewards if abs(r) < 10)
     print(f"Summary of last rewards over {test_episodes} episodes: +100={count_100}, -100={count_neg100}, ~0={count_near0}")
 
+    # Collect model details
+    def count_nodes(module):
+        nodes = 0
+        for m in module.modules():
+            if isinstance(m, nn.Linear):
+                nodes += m.out_features
+        return nodes
+
+    def get_model_details(model, name):
+        total_params = sum(p.numel() for p in model.parameters())
+        nodes = count_nodes(model)
+        return {"name": name, "total_parameters": total_params, "total_nodes": nodes}
+
+    actor_details = get_model_details(algo.actor, "Actor")
+    critic_details = get_model_details(algo.critic, "Critic")
+
+    total_parameters = actor_details["total_parameters"] + critic_details["total_parameters"]
+    total_nodes = actor_details["total_nodes"] + critic_details["total_nodes"]
+    results_json = {
+        "model_details": [actor_details, critic_details],
+        "total_parameters": total_parameters,
+        "total_nodes": total_nodes,
+        "num_episodes": test_episodes,
+        "count_100": count_100,
+        "count_neg100": count_neg100,
+        "count_near0": count_near0
+    }
+    import json
+    print("TEST_RESULTS_JSON_START\n" + json.dumps(results_json) )
+
     rtn = test_episodes == count_100
 
     if rtn:
