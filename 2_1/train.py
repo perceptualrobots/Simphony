@@ -47,6 +47,18 @@ for arg in sys.argv:
     if match:
         test_episodes = int(match.group(1))
         break
+# Check for existence of models and buffer in current directory, else use 'final_test_models'
+def models_and_buffer_exist(directory):
+    required_files = ['actor_model.pt', 'critic_model.pt', 'critic_target_model.pt', 'replay_buffer']
+    return all(os.path.exists(os.path.join(directory, f)) for f in required_files)
+
+if not models_and_buffer_exist(models_dir):
+    alt_dir = os.path.join(os.getcwd(), 'final_test_models')
+    if models_and_buffer_exist(alt_dir):
+        print(f"Models and buffer not found in {models_dir}, switching to {alt_dir}")
+        models_dir = alt_dir
+    else:
+        print(f"Warning: Models and buffer not found in {models_dir} or {alt_dir}")
 print(f"Using models directory: {models_dir}")
 
 # -------------------- Environment setup --------------------
@@ -282,19 +294,10 @@ render = '--render' in sys.argv
 # Add record_video command line option
 record_video = '--record_video' in sys.argv
 # Add models directory command line option
-import os
-models_dir = os.getcwd()
-test_episodes = 10
-for arg in sys.argv:
-    if arg.startswith('--models-dir='):
-        models_dir = arg.split('=', 1)[1]
-    match = re.match(r'--episodes=(\d+)', arg)
-    if match:
-        test_episodes = int(match.group(1))
-        break
 
-# Always print the models_dir being used
-print(f"Using models directory: {models_dir}")
+
+
+# Always print the models_dir being used (after possible switch)
 
 def make_env_test(option, render, record_video=False):
     # If recording video, use render_mode="rgb_array" as required by gymnasium RecordVideo
@@ -392,6 +395,7 @@ if '--test-only' in sys.argv:
         print(f"Could not generate network images: {e}")
 
     testing(env_test, limit_eval, test_episodes, render=render, record_video=record_video)
+    print(f"Test-only run complete. Models directory used: {models_dir}")
     exit()
 
 #-------------------------------------------------------------------------------------
