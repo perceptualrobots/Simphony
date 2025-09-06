@@ -220,15 +220,14 @@ def testing(env, limit_step, test_episodes, render=False, record_video=False, vi
 try:
     print("loading buffer...")
     try:
-        with open('replay_buffer', 'rb') as file:
+        buffer_path = os.path.join(models_dir, 'replay_buffer')
+        with open(buffer_path, 'rb') as file:
             dict = pickle.load(file)
     except Exception as e:
         import sys, os
         if '--test-only' in sys.argv:
-            buffer_path = os.path.join('..', 'test_models', 'replay_buffer')
             print(f"Trying alternate buffer path: {buffer_path}")
-            with open(buffer_path, 'rb') as file:
-                dict = pickle.load(file)
+            raise
         else:
             raise e
     algo.actor.noise.x_coor = dict['x_coor']
