@@ -433,7 +433,7 @@ if '--test-only' in sys.argv:
         import matplotlib.patches as patches
         import networkx as nx
         
-        def draw_traditional_nn(model, input_size, filename, title, width_scale=5, height_scale=1):
+        def draw_traditional_nn(model, input_size, filename, title, width_scale=5, height_scale=1, max_nodes_per_layer=20, circle_size=0.15, line_thickness=0.5):
             """Draw traditional neural network with circles for nodes and lines for connections"""
             
             # Get layer sizes by analyzing the model
@@ -444,24 +444,39 @@ if '--test-only' in sys.argv:
                 if isinstance(module, nn.Linear):
                     layer_sizes.append(module.out_features)
             
-            # Calculate figure dimensions based on network size
-            num_layers = len(layer_sizes)
-            max_nodes = max(layer_sizes)
+            # Apply node scaling to keep visualization manageable
+            original_layer_sizes = layer_sizes.copy()
+            scaled_layer_sizes = []
+            for size in layer_sizes:
+                if size > max_nodes_per_layer:
+                    scaled_size = max_nodes_per_layer
+                    scaled_layer_sizes.append(scaled_size)
+                else:
+                    scaled_layer_sizes.append(size)
+            
+            # Calculate figure dimensions based on scaled network size
+            num_layers = len(scaled_layer_sizes)
+            max_nodes = max(scaled_layer_sizes)
             
             # Adjust figure size - make it wider and proportional to network size
             fig_width = max(8, num_layers * 3) * width_scale  # Apply width scale
             fig_height = max(6, max_nodes * 0.3) * height_scale  # Apply height scale
             print(f"Creating {title}: fig_width={fig_width}, fig_height={fig_height}, num_layers={num_layers}, max_nodes={max_nodes}, width_scale={width_scale}, height_scale={height_scale}")
+            print(f"circle_size={circle_size}, line_thickness={line_thickness}")
+            print(f"Original layer sizes: {original_layer_sizes}")
+            print(f"Scaled layer sizes: {scaled_layer_sizes} (max_nodes_per_layer={max_nodes_per_layer})")
             
             # Create figure
             fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
             
-            # Set limits with more horizontal space
-            ax.set_xlim(-0.5, num_layers - 0.5)
-            ax.set_ylim(-1, max_nodes + 1)
+            # Calculate stretched x-coordinates to utilize the wider figure
+            x_stretch_factor = width_scale  # Use the width scale as stretch factor
+            x_spacing = 1 * x_stretch_factor  # Space between layers
             
-            # Remove aspect ratio constraint to allow natural scaling
-            # ax.set_aspect('equal')  # Comment this out to allow stretching
+            # Set limits to accommodate stretched x-coordinates
+            ax.set_xlim(-0.5 * x_stretch_factor, (num_layers - 1) * x_stretch_factor + 0.5 * x_stretch_factor)
+            ax.set_ylim(-1, max_nodes + 1)
+            ax.set_aspect('equal')  # Keep circles perfectly round
             ax.axis('off')
             ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
             
@@ -470,24 +485,21 @@ if '--test-only' in sys.argv:
             
             node_positions = {}
             
-            # Draw nodes (circles) for each layer
-            for layer_idx, size in enumerate(layer_sizes):
+            # Draw nodes (circles) for each layer using scaled sizes
+            for layer_idx, (original_size, scaled_size) in enumerate(zip(original_layer_sizes, scaled_layer_sizes)):
                 color = colors[layer_idx % len(colors)]
-                x = layer_idx
+                x = layer_idx * x_stretch_factor  # Apply horizontal stretching
                 
                 # Calculate y positions to center the layer
-                if size == 1:
+                if scaled_size == 1:
                     y_positions = [max_nodes / 2]
                 else:
-                    y_step = (max_nodes - 1) / max(1, size - 1) if size > 1 else 0
-                    y_start = (max_nodes - 1 - y_step * (size - 1)) / 2
-                    y_positions = [y_start + i * y_step for i in range(size)]
+                    y_step = (max_nodes - 1) / max(1, scaled_size - 1) if scaled_size > 1 else 0
+                    y_start = (max_nodes - 1 - y_step * (scaled_size - 1)) / 2
+                    y_positions = [y_start + i * y_step for i in range(scaled_size)]
                 
-                # Adjust circle size based on figure size and scaling
-                # Calculate radius in data coordinates to keep circles round
-                base_radius = 0.15
-                # Scale radius inversely with width_scale to maintain visual proportion
-                circle_radius = base_radius / max(1, width_scale * 0.2)
+                # Keep circles at a reasonable size using the parameter
+                circle_radius = circle_size
                 
                 # Draw nodes
                 for node_idx, y in enumerate(y_positions):
@@ -496,13 +508,19 @@ if '--test-only' in sys.argv:
                     node_positions[(layer_idx, node_idx)] = (x, y)
                     
                     # Add node labels for small networks
-                    if size <= 10:
+                    if scaled_size <= 10:
                         ax.text(x, y, str(node_idx), ha='center', va='center', fontsize=8, fontweight='bold')
+                    
+                # Add "..." indicator if layer was truncated
+                if original_size > scaled_size:
+                    # Add ellipsis to indicate more nodes exist
+                    ellipsis_y = y_positions[-1] + (y_positions[1] - y_positions[0]) if len(y_positions) > 1 else y_positions[0] + 0.5
+                    ax.text(x, ellipsis_y, '...', ha='center', va='center', fontsize=12, fontweight='bold', style='italic')
             
-            # Draw connections between layers
-            for layer_idx in range(len(layer_sizes) - 1):
-                current_layer_size = layer_sizes[layer_idx]
-                next_layer_size = layer_sizes[layer_idx + 1]
+            # Draw connections between layers (using scaled sizes)
+            for layer_idx in range(len(scaled_layer_sizes) - 1):
+                current_layer_size = scaled_layer_sizes[layer_idx]
+                next_layer_size = scaled_layer_sizes[layer_idx + 1]
                 
                 # Draw lines between all nodes in adjacent layers
                 for i in range(current_layer_size):
@@ -511,13 +529,18 @@ if '--test-only' in sys.argv:
                             x1, y1 = node_positions[(layer_idx, i)]
                             x2, y2 = node_positions[(layer_idx + 1, j)]
                             
-                            # Make lines semi-transparent to avoid clutter
-                            ax.plot([x1, x2], [y1, y2], 'gray', alpha=0.3, linewidth=0.5)
+                            # Make lines semi-transparent to avoid clutter, use parameter for thickness
+                            ax.plot([x1, x2], [y1, y2], 'gray', alpha=0.3, linewidth=line_thickness)
             
-            # Add layer labels with more space
-            layer_names = ['Input'] + [f'Hidden {i}' for i in range(len(layer_sizes) - 2)] + ['Output']
-            for i, (size, name) in enumerate(zip(layer_sizes, layer_names)):
-                ax.text(i, -0.8, f'{name}\n({size} nodes)', ha='center', va='top', 
+            # Add layer labels with more space, showing original sizes
+            layer_names = ['Input'] + [f'Hidden {i}' for i in range(len(scaled_layer_sizes) - 2)] + ['Output']
+            for i, (original_size, scaled_size, name) in enumerate(zip(original_layer_sizes, scaled_layer_sizes, layer_names)):
+                if original_size == scaled_size:
+                    label_text = f'{name}\n({original_size} nodes)'
+                else:
+                    label_text = f'{name}\n({original_size} nodes)\n(showing {scaled_size})'
+                x_label = i * x_stretch_factor  # Use stretched x-coordinates for labels
+                ax.text(x_label, -0.8, label_text, ha='center', va='top', 
                        fontsize=10, fontweight='bold')
             
             # Use tight_layout with padding to prevent squashing
@@ -528,11 +551,14 @@ if '--test-only' in sys.argv:
         
         # Draw Actor network
         width_scale=10 
-        height_scale=5
-        draw_traditional_nn(algo.actor, state_dim, 'actor_traditional_nn.png', 'Actor Network Architecture', width_scale=width_scale, height_scale=height_scale)
+        height_scale=1
+        max_nodes_per_layer=25
+        circle_size=0.5
+        line_thickness=1.0
+        draw_traditional_nn(algo.actor, state_dim, 'actor_traditional_nn.png', 'Actor Network Architecture', width_scale=width_scale, height_scale=height_scale, max_nodes_per_layer=max_nodes_per_layer, circle_size=circle_size, line_thickness=line_thickness)
 
         # Draw Critic network  
-        draw_traditional_nn(algo.critic, state_dim + action_dim, 'critic_traditional_nn.png', 'Critic Network Architecture', width_scale=width_scale, height_scale=height_scale)
+        draw_traditional_nn(algo.critic, state_dim + action_dim, 'critic_traditional_nn.png', 'Critic Network Architecture', width_scale=width_scale, height_scale=height_scale, max_nodes_per_layer=max_nodes_per_layer, circle_size=circle_size, line_thickness=line_thickness)
 
     except ImportError as e:
         print(f"matplotlib not installed. Run 'pip install matplotlib networkx' for traditional NN diagrams: {e}")
