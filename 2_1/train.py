@@ -369,30 +369,189 @@ if '--test-only' in sys.argv:
     print_model_details(algo.actor, "Actor")
     print_model_details(algo.critic, "Critic")
 
-    # Try to generate and save a network image using torchviz
+    # Try to generate network visualizations
+    dummy_state = torch.zeros(1, state_dim).to(device)
+    dummy_action = torch.zeros(1, action_dim).to(device)
+    
+    # Method 1: torchview (layer-by-layer architecture view)
+    try:
+        from torchview import draw_graph
+        
+        # Actor network visualization
+        actor_model_graph = draw_graph(
+            algo.actor, 
+            input_data=dummy_state,
+            expand_nested=True,
+            save_graph=True,
+            filename='actor_architecture',
+            directory='.',
+        )
+        print("Actor architecture saved as actor_architecture.png")
+        
+        # Critic network visualization
+        critic_model_graph = draw_graph(
+            algo.critic,
+            input_data=[dummy_state, dummy_action],
+            expand_nested=True, 
+            save_graph=True,
+            filename='critic_architecture',
+            directory='.',
+        )
+        print("Critic architecture saved as critic_architecture.png")
+        
+    except ImportError:
+        print("torchview not installed. Run 'pip install torchview' to generate architecture diagrams.")
+    except Exception as e:
+        print(f"Could not generate architecture diagrams with torchview: {e}")
+    
+    # Method 2: torchviz (computational graph view)
     try:
         from torchviz import make_dot
-        dummy_state = torch.zeros(1, state_dim).to(device)
-        dummy_action = torch.zeros(1, action_dim).to(device)
         actor_out = algo.actor(dummy_state, mean=True)
         if isinstance(actor_out, (list, tuple)):
             actor_out = actor_out[0]
         actor_graph = make_dot(actor_out, params={k: v for k, v in algo.actor.named_parameters()})
         actor_graph.format = "png"
-        actor_graph.render("actor_network", cleanup=True)
-        print("Actor network image saved as actor_network.png")
+        actor_graph.render("actor_computation_graph", cleanup=True)
+        print("Actor computation graph saved as actor_computation_graph.png")
 
         critic_out = algo.critic(dummy_state, dummy_action)
         if isinstance(critic_out, (list, tuple)):
             critic_out = critic_out[0]
         critic_graph = make_dot(critic_out, params={k: v for k, v in algo.critic.named_parameters()})
         critic_graph.format = "png"
-        critic_graph.render("critic_network", cleanup=True)
-        print("Critic network image saved as critic_network.png")
+        critic_graph.render("critic_computation_graph", cleanup=True)
+        print("Critic computation graph saved as critic_computation_graph.png")
     except ImportError:
-        print("torchviz not installed. Run 'pip install torchviz' in your .venv to generate network images.")
+        print("torchviz not installed. Run 'pip install torchviz' to generate computation graphs.")
     except Exception as e:
-        print(f"Could not generate network images: {e}")
+        print(f"Could not generate computation graphs: {e}")
+    
+    # Method 3: Traditional neural network diagrams (nodes as circles)
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
+        import networkx as nx
+        
+        def draw_traditional_nn(model, input_size, filename, title, width_scale=5, height_scale=1):
+            """Draw traditional neural network with circles for nodes and lines for connections"""
+            
+            # Get layer sizes by analyzing the model
+            layer_sizes = []
+            layer_sizes.append(input_size)  # Input layer
+            
+            for module in model.modules():
+                if isinstance(module, nn.Linear):
+                    layer_sizes.append(module.out_features)
+            
+            # Calculate figure dimensions based on network size
+            num_layers = len(layer_sizes)
+            max_nodes = max(layer_sizes)
+            
+            # Adjust figure size - make it wider and proportional to network size
+            fig_width = max(8, num_layers * 3) * width_scale  # Apply width scale
+            fig_height = max(6, max_nodes * 0.3) * height_scale  # Apply height scale
+            print(f"Creating {title}: fig_width={fig_width}, fig_height={fig_height}, num_layers={num_layers}, max_nodes={max_nodes}, width_scale={width_scale}, height_scale={height_scale}")
+            
+            # Create figure
+            fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
+            
+            # Set limits with more horizontal space
+            ax.set_xlim(-0.5, num_layers - 0.5)
+            ax.set_ylim(-1, max_nodes + 1)
+            
+            # Remove aspect ratio constraint to allow natural scaling
+            # ax.set_aspect('equal')  # Comment this out to allow stretching
+            ax.axis('off')
+            ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
+            
+            # Colors for different layer types
+            colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 'lightpink']
+            
+            node_positions = {}
+            
+            # Draw nodes (circles) for each layer
+            for layer_idx, size in enumerate(layer_sizes):
+                color = colors[layer_idx % len(colors)]
+                x = layer_idx
+                
+                # Calculate y positions to center the layer
+                if size == 1:
+                    y_positions = [max_nodes / 2]
+                else:
+                    y_step = (max_nodes - 1) / max(1, size - 1) if size > 1 else 0
+                    y_start = (max_nodes - 1 - y_step * (size - 1)) / 2
+                    y_positions = [y_start + i * y_step for i in range(size)]
+                
+                # Adjust circle size based on figure size and scaling
+                # Calculate radius in data coordinates to keep circles round
+                base_radius = 0.15
+                # Scale radius inversely with width_scale to maintain visual proportion
+                circle_radius = base_radius / max(1, width_scale * 0.2)
+                
+                # Draw nodes
+                for node_idx, y in enumerate(y_positions):
+                    circle = patches.Circle((x, y), circle_radius, facecolor=color, edgecolor='black', linewidth=1)
+                    ax.add_patch(circle)
+                    node_positions[(layer_idx, node_idx)] = (x, y)
+                    
+                    # Add node labels for small networks
+                    if size <= 10:
+                        ax.text(x, y, str(node_idx), ha='center', va='center', fontsize=8, fontweight='bold')
+            
+            # Draw connections between layers
+            for layer_idx in range(len(layer_sizes) - 1):
+                current_layer_size = layer_sizes[layer_idx]
+                next_layer_size = layer_sizes[layer_idx + 1]
+                
+                # Draw lines between all nodes in adjacent layers
+                for i in range(current_layer_size):
+                    for j in range(next_layer_size):
+                        if (layer_idx, i) in node_positions and (layer_idx + 1, j) in node_positions:
+                            x1, y1 = node_positions[(layer_idx, i)]
+                            x2, y2 = node_positions[(layer_idx + 1, j)]
+                            
+                            # Make lines semi-transparent to avoid clutter
+                            ax.plot([x1, x2], [y1, y2], 'gray', alpha=0.3, linewidth=0.5)
+            
+            # Add layer labels with more space
+            layer_names = ['Input'] + [f'Hidden {i}' for i in range(len(layer_sizes) - 2)] + ['Output']
+            for i, (size, name) in enumerate(zip(layer_sizes, layer_names)):
+                ax.text(i, -0.8, f'{name}\n({size} nodes)', ha='center', va='top', 
+                       fontsize=10, fontweight='bold')
+            
+            # Use tight_layout with padding to prevent squashing
+            plt.tight_layout(pad=2.0)
+            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            print(f"Traditional neural network diagram saved as {filename}")
+        
+        # Draw Actor network
+        width_scale=10 
+        height_scale=5
+        draw_traditional_nn(algo.actor, state_dim, 'actor_traditional_nn.png', 'Actor Network Architecture', width_scale=width_scale, height_scale=height_scale)
+
+        # Draw Critic network  
+        draw_traditional_nn(algo.critic, state_dim + action_dim, 'critic_traditional_nn.png', 'Critic Network Architecture', width_scale=width_scale, height_scale=height_scale)
+
+    except ImportError as e:
+        print(f"matplotlib not installed. Run 'pip install matplotlib networkx' for traditional NN diagrams: {e}")
+    except Exception as e:
+        print(f"Could not generate traditional NN diagrams: {e}")
+    
+    # Method 4: Simple text summary
+    try:
+        from torchsummary import summary
+        print("\n=== ACTOR MODEL SUMMARY ===")
+        summary(algo.actor, input_size=(state_dim,))
+        print("\n=== CRITIC MODEL SUMMARY ===") 
+        # For critic, we need to handle dual inputs
+        print("Critic input: state + action")
+        print(f"State shape: ({state_dim},), Action shape: ({action_dim},)")
+    except ImportError:
+        print("torchsummary not installed. Run 'pip install torchsummary' for detailed model summaries.")
+    except Exception as e:
+        print(f"Could not generate model summaries: {e}")
 
     testing(env_test, limit_eval, test_episodes, render=render, record_video=record_video)
     print(f"Test-only run complete. Models directory used: {models_dir}")
