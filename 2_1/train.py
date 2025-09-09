@@ -12,6 +12,16 @@ import sys
 import re
 import os
 
+"""
+
+python train.py --test-only --episodes=100
+
+python train.py --test-only --render --record_video --models-dir=final_test_models --episodes=100
+
+
+
+"""
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
@@ -143,7 +153,7 @@ def testing(env, limit_step, test_episodes, render=False, record_video=False, vi
     """
     if test_episodes < 1:
         return
-    print("Validation... ", test_episodes, " epsodes")
+    print("Validation... ", test_episodes, " episodes")
     episode_return = []
 
     import random
