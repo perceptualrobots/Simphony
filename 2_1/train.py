@@ -50,13 +50,16 @@ render = '--render' in sys.argv
 record_video = '--record_video' in sys.argv
 models_dir = os.getcwd()
 test_episodes = 10
+start_test_episode = 0
 for arg in sys.argv:
     if arg.startswith('--models-dir='):
         models_dir = arg.split('=', 1)[1]
     match = re.match(r'--episodes=(\d+)', arg)
     if match:
         test_episodes = int(match.group(1))
-        break
+    match = re.match(r'--start_episode=(\d+)', arg)
+    if match:
+        start_test_episode = int(match.group(1))
 # Check for existence of models and buffer in current directory, else use 'final_test_models'
 def models_and_buffer_exist(directory):
     required_files = ['actor_model.pt', 'critic_model.pt', 'critic_target_model.pt', 'replay_buffer']
@@ -146,10 +149,11 @@ def init_weights(m):
 
 
 #testing model
-def testing(env, limit_step, test_episodes, render=False, record_video=False, video_dir="videos"):
+def testing(env, limit_step, test_episodes, render=False, record_video=False, video_dir="videos", start_episode=0):
     """
     Test the agent in the environment.
     If record_video is True, saves a video for each test_episode in video_dir.
+    start_episode: The number to use for the first test episode.
     """
     if test_episodes < 1:
         return
@@ -160,7 +164,8 @@ def testing(env, limit_step, test_episodes, render=False, record_video=False, vi
     import os
     last_rewards = []
 
-    for test_episode in range(test_episodes):
+    for i in range(test_episodes):
+        test_episode = start_episode + i
         # Use test_episode as the seed for reproducibility per episode
         seed = test_episode + 1
         np.random.seed(seed)
@@ -348,6 +353,7 @@ if '--test-only' in sys.argv:
     print('Running in test-only mode...')
     print(f"Render mode: {render}")
     print(f"Test episodes: {test_episodes}")
+    print(f"Starting from test episode: {start_test_episode}")
     print(f"Record video: {record_video}")
 
     # --- Model loading (using models_dir) ---
@@ -589,7 +595,7 @@ if '--test-only' in sys.argv:
     except Exception as e:
         print(f"Could not generate model summaries: {e}")
 
-    testing(env_test, limit_eval, test_episodes, render=render, record_video=record_video)
+    testing(env_test, limit_eval, test_episodes, render=render, record_video=record_video, start_episode=start_test_episode)
     print(f"Test-only run complete. Models directory used: {models_dir}")
     exit()
 
@@ -699,7 +705,7 @@ for i in range(start_episode, num_episodes):
 
         #-----------------validation-------------------------
         if (i>=start_test and i%50==0):
-            if testing(env_test, limit_step=limit_eval, test_episodes=training_validation_episodes):
+            if testing(env_test, limit_step=limit_eval, test_episodes=training_validation_episodes, start_episode=0):
                 print("Terminating training: testing returned True.")
                 break
               
